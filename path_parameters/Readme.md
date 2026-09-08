@@ -1,0 +1,2 @@
+- https://fastapi.tiangolo.com/tutorial/path-params/#path-convertor
+- uv run fastapi dev

@@ -1,0 +1,1 @@
+- https://fastapi.tiangolo.com/tutorial/query-params-str-validations/#import-query-and-annotated
