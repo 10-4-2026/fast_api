@@ -1,2 +1,5 @@
-- uv run uvicorn single_model.main:app --reload
-- uv run fastapi dev src/single_model/main.py
+- Cai dat cac goi can thiet: 
+    - uv sync
+- Chay chuong trinh
+    - uv run uvicorn single_model.main:app --reload
+    - uv run fastapi dev src/single_model/main.py
