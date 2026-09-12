@@ -1,0 +1,1 @@
+- uv run uvicorn single_model.main:app --reload
