@@ -1,0 +1,3 @@
+- https://share.gemini.google/l5p0PYhj28ET
+- https://share.gemini.google/Dr82LQBXi7D5
+- uvicorn src.phase_1.main:app --reload
