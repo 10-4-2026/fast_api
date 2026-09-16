@@ -12,10 +12,93 @@ from phase_1.adapters.database import get_db_session, engine, Base
 from phase_1.adapters.orm_models import DeviceTelemetryModel
 from phase_1.services.telemetry_worker import telemetry_processor
 
+
+'''
+Đây là đoạn code sử dụng cơ chế Lifespan Events của FastAPI để quản lý vòng đời (lifecycle) của ứng dụng: khởi động (startup) và tắt (shutdown).
+'''
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    '''
+    @asynccontextmanager là decorator của Python giúp biến một hàm async thành context manager bất đồng bộ.
+
+Nó hoạt động theo mô hình:
+
+# Startup
+...
+
+yield
+
+# Shutdown
+
+Show more lines
+Mọi code trước yield sẽ chạy khi ứng dụng khởi động.
+Mọi code sau yield sẽ chạy khi ứng dụng tắt.
+
+Tương tự như:
+
+print("Startup")
+
+yield
+
+print("Shutdown")
+    '''
     # 1. Khởi tạo database tables (hoặc dùng Alembic migration)
     async with engine.begin() as conn:
+        '''
+        2. Khởi tạo database
+        async with engine.begin() as conn:
+
+        await conn.run_sync(Base.metadata.create_all)
+
+        engine.begin()
+
+        Mở một database connection và transaction.
+
+        Ví dụ:
+
+        async with engine.begin() as conn:
+
+        tương đương:
+
+        conn = await engine.connect()
+        try:
+            await conn.run_sync(Base.metadata.create_all)
+        finally:
+                await conn.close()
+
+Base.metadata.create_all
+
+Là metadata của các model SQLAlchemy.
+
+Ví dụ:
+
+class Vehicle(Base):
+
+__tablename__ = "vehicles"
+
+id = Column(Integer, primary_key=True)
+vin = Column(String)
+
+
+Khi gọi:
+Base.metadata.create_all(engine)
+
+SQLAlchemy sẽ tạo bảng:
+
+CREATE TABLE vehicles (
+id INTEGER PRIMARY KEY,
+vin VARCHAR
+);
+
+run_sync
+
+Vì create_all() là hàm sync còn engine là async nên phải dùng:
+
+
+await conn.run_sync(Base.metadata.create_all)
+
+để chạy hàm sync trong ngữ cảnh async.
+        '''
         await conn.run_sync(Base.metadata.create_all)
         pass
     # 2. Khởi chạy background worker
