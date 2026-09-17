@@ -1,0 +1,181 @@
+'''
+Bước 5: Xây dựng FastAPI Entrypoint & Quản lý Lifespan
+Tại src/main.py, kết nối toàn bộ hệ thống bằng cơ chế Lifespan của 
+FastAPI (khởi động background worker khi app chạy và tắt an toàn khi app dừng).
+'''
+
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Depends, BackgroundTasks
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from adapters.database import get_db_session, engine, Base
+from adapters.orm_models import DeviceTelemetryModel
+from services.telemetry_worker import telemetry_processor
+
+
+'''
+Đây là đoạn code sử dụng cơ chế Lifespan Events của FastAPI để quản lý vòng đời
+ (lifecycle) của ứng dụng: khởi động (startup) và tắt (shutdown).
+
+ Ý tưởng tổng quát:
+
+Trước yield → Khởi tạo tài nguyên (DB, Redis, Kafka, Worker, Model AI...)
+Sau yield → Giải phóng tài nguyên khi shutdown
+lifespan là cách hiện đại thay thế cho:
+
+@app.on_event("startup")
+
+async def startup():
+...
+@app.on_event("shutdown")
+
+async def shutdown():
+
+
+trong các phiên bản FastAPI mới.
+'''
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    '''
+    @asynccontextmanager là decorator của Python giúp biến một hàm async thành context manager bất đồng bộ.
+
+Nó hoạt động theo mô hình:
+
+# Startup
+...
+
+yield
+
+# Shutdown
+
+Show more lines
+Mọi code trước yield sẽ chạy khi ứng dụng khởi động.
+Mọi code sau yield sẽ chạy khi ứng dụng tắt.
+
+Tương tự như:
+
+print("Startup")
+
+yield
+
+print("Shutdown")
+    '''
+    # 1. Khởi tạo database tables (hoặc dùng Alembic migration)
+    async with engine.begin() as conn:
+        '''
+        2. Khởi tạo database
+        async with engine.begin() as conn:
+
+        await conn.run_sync(Base.metadata.create_all)
+
+        engine.begin()
+
+        Mở một database connection và transaction.
+
+        Ví dụ:
+
+        async with engine.begin() as conn:
+
+        tương đương:
+
+        conn = await engine.connect()
+        try:
+            await conn.run_sync(Base.metadata.create_all)
+        finally:
+                await conn.close()
+
+Base.metadata.create_all
+
+Là metadata của các model SQLAlchemy.
+
+Ví dụ:
+
+class Vehicle(Base):
+
+__tablename__ = "vehicles"
+
+id = Column(Integer, primary_key=True)
+vin = Column(String)
+
+
+Khi gọi:
+Base.metadata.create_all(engine)
+
+SQLAlchemy sẽ tạo bảng:
+
+CREATE TABLE vehicles (
+id INTEGER PRIMARY KEY,
+vin VARCHAR
+);
+
+run_sync
+
+Vì create_all() là hàm sync còn engine là async nên phải dùng:
+
+
+await conn.run_sync(Base.metadata.create_all)
+
+để chạy hàm sync trong ngữ cảnh async.
+        '''
+        await conn.run_sync(Base.metadata.create_all)
+        pass
+    # 2. Khởi chạy background worker
+    await telemetry_processor.start()
+
+    '''
+    Đây là điểm bàn giao quyền điều khiển cho FastAPI.
+Sau khi:
+Database Ready
+Telemetry Worker Ready
+
+FastAPI mới bắt đầu:
+nhận request
+mở API endpoints
+xử lý traffic
+    '''
+    yield
+
+    # Stop background worker
+    # 3. Dọn dẹp tài nguyên khi tắt ứng dụng
+    '''
+    Khi ứng dụng nhận:
+Ctrl + C
+hoặc:
+docker stop
+FastAPI sẽ quay lại phần sau yield.
+    '''
+    await telemetry_processor.stop()
+    '''
+    đóng toàn bộ connection
+    giải phóng tài nguyên
+    tránh memory leak
+    '''
+    await engine.dispose()
+    pass
+
+app = FastAPI(
+    title="IoT Connected Vehicle Platform",
+    version="1.0.0",
+    lifespan=lifespan # Hãy dùng hàm lifespan() để quản lý startup và shutdown cho ứng dụng.
+    )
+
+@app.post("/api/v1/telemetry")
+async def receive_telemetry(data: dict):
+    """API nhận dữ liệu từ Edge Device và đẩy vào Async Queue"""
+    # Đẩy dữ liệu vào hàng đợi bất đồng bộ ngay lập tức để trả về response nhanh
+    await telemetry_processor.push(data)
+    return {
+        "status": "accepted", "message": "Telemetry queued for processing"
+    }
+
+@app.get("/api/v1/devices/{device_id}/logs")
+async def get_device_logs(device_id: str, db: AsyncSession = Depends(get_db_session)):
+    """API lấy dữ liệu Telemetry từ DB cho thiết bị cụ thể"""
+    from sqlalchemy import select
+    result = await db.execute(
+        select(DeviceTelemetryModel).where(DeviceTelemetryModel.device_id == device_id)
+    )
+    logs = result.scalars().all()
+    return {
+        "device_id": device_id, "data": logs
+    }
