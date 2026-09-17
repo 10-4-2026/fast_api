@@ -14,7 +14,25 @@ from phase_1.services.telemetry_worker import telemetry_processor
 
 
 '''
-Đây là đoạn code sử dụng cơ chế Lifespan Events của FastAPI để quản lý vòng đời (lifecycle) của ứng dụng: khởi động (startup) và tắt (shutdown).
+Đây là đoạn code sử dụng cơ chế Lifespan Events của FastAPI để quản lý vòng đời
+ (lifecycle) của ứng dụng: khởi động (startup) và tắt (shutdown).
+
+ Ý tưởng tổng quát:
+
+Trước yield → Khởi tạo tài nguyên (DB, Redis, Kafka, Worker, Model AI...)
+Sau yield → Giải phóng tài nguyên khi shutdown
+lifespan là cách hiện đại thay thế cho:
+
+@app.on_event("startup")
+
+async def startup():
+...
+@app.on_event("shutdown")
+
+async def shutdown():
+
+
+trong các phiên bản FastAPI mới.
 '''
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -104,18 +122,41 @@ await conn.run_sync(Base.metadata.create_all)
     # 2. Khởi chạy background worker
     await telemetry_processor.start()
 
+    '''
+    Đây là điểm bàn giao quyền điều khiển cho FastAPI.
+Sau khi:
+Database Ready
+Telemetry Worker Ready
+
+FastAPI mới bắt đầu:
+nhận request
+mở API endpoints
+xử lý traffic
+    '''
     yield
 
     # Stop background worker
     # 3. Dọn dẹp tài nguyên khi tắt ứng dụng
+    '''
+    Khi ứng dụng nhận:
+Ctrl + C
+hoặc:
+docker stop
+FastAPI sẽ quay lại phần sau yield.
+    '''
     await telemetry_processor.stop()
+    '''
+    đóng toàn bộ connection
+    giải phóng tài nguyên
+    tránh memory leak
+    '''
     await engine.dispose()
     pass
 
 app = FastAPI(
     title="IoT Connected Vehicle Platform",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan # Hãy dùng hàm lifespan() để quản lý startup và shutdown cho ứng dụng.
     )
 
 @app.post("/api/v1/telemetry")
